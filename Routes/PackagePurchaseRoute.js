@@ -1,7 +1,9 @@
 import express from "express";
+import Formidable from "express-formidable";
 import { isAdmin, requireSignIn } from "../middleware/UserMiddleware.js";
 import {
   getAllTransactionController,
+  getUserAllMembershipController,
   // getSingleController,
   getUserMembershipController,
   packagePurchaseController,
@@ -11,7 +13,12 @@ import {
 const router = express.Router();
 
 // Purchase package route
-router.post("/purchasepackage", requireSignIn, packagePurchaseController);
+router.post(
+  "/purchasepackage",
+  requireSignIn,
+  Formidable(),
+  packagePurchaseController
+);
 
 //get single by user
 
@@ -34,5 +41,11 @@ router.put(
 );
 //get single ho kar raha ha na
 router.get("/membership", requireSignIn, getUserMembershipController);
+
+router.get(
+  "/user/latest-membership",
+  requireSignIn,
+  getUserAllMembershipController
+);
 
 export default router;
