@@ -3,13 +3,6 @@ import PackagesModel from "../models/PackagesModel.js";
 import UserModel from "../models/UserModel.js";
 
 // Utility function to calculate remaining price after discount
-const calculateRemainingPrice = (price, discount = 0) => {
-  const remainingPrice = price - discount;
-  if (remainingPrice <= 0) {
-    throw new Error("Price after discount must be greater than 0");
-  }
-  return remainingPrice;
-};
 
 // Create Package Controller
 export const createPackageController = async (req, res) => {
@@ -179,6 +172,19 @@ export const deletePackageController = async (req, res) => {
 };
 
 // Update Package Controller
+import slugify from "slugify";
+import PackagesModel from "../models/PackagesModel.js";
+
+// Utility function to calculate remaining price after discount
+const calculateRemainingPrice = (price, discount = 0) => {
+  const remainingPrice = price - discount;
+  if (remainingPrice <= 0) {
+    throw new Error("Price after discount must be greater than 0");
+  }
+  return remainingPrice;
+};
+
+// Update Package Controller
 export const updatePackageController = async (req, res) => {
   try {
     const {
@@ -187,10 +193,11 @@ export const updatePackageController = async (req, res) => {
       price,
       duration,
       earningRate,
-      isActive,
+      numOfAds,
       discount,
       commissionRate,
       Packagecurrency,
+      isActive,
     } = req.body;
 
     // Validation
@@ -200,7 +207,8 @@ export const updatePackageController = async (req, res) => {
       !price ||
       !duration ||
       !earningRate ||
-      !commissionRate
+      !commissionRate ||
+      !Packagecurrency
     ) {
       return res.status(400).send({ error: "All fields are required" });
     }
@@ -211,11 +219,28 @@ export const updatePackageController = async (req, res) => {
         .send({ error: "Invalid currency, must be USD or PKR" });
     }
 
+    // Calculate remaining price after discount
     const remainingPrice = calculateRemainingPrice(price, discount);
 
+    // Generate slug from package name
+    const slug = slugify(name, { lower: true, strict: true });
+
+    // Update package details in the database
     const updatedPackage = await PackagesModel.findByIdAndUpdate(
       req.params.pid,
-      { ...req.body, slug: slugify(name), price: remainingPrice },
+      {
+        name,
+        description,
+        price: remainingPrice,
+        duration,
+        earningRate,
+        numOfAds,
+        discount,
+        commissionRate,
+        isActive,
+        slug,
+        Packagecurrency,
+      },
       { new: true, runValidators: true }
     );
 
@@ -223,6 +248,7 @@ export const updatePackageController = async (req, res) => {
       return res.status(404).send({ error: "Package not found" });
     }
 
+    // Send response with updated package details
     res.status(200).send({
       success: true,
       message: "Package updated successfully",
