@@ -3,6 +3,7 @@ import PackagesModel from "../models/PackagesModel.js";
 import UserModel from "../models/UserModel.js"; // Assuming UserModel is your user model
 
 // Package Purchase Controller
+// Package Purchase Controller
 export const packagePurchaseController = async (req, res) => {
   try {
     const { slug, transactionId, sendernumber } = req.body;
@@ -37,20 +38,28 @@ export const packagePurchaseController = async (req, res) => {
     expiryDate.setDate(expiryDate.getDate() + pkg.duration); // Calculate expiry
 
     if (existingPurchase) {
-      if (existingPurchase.expiryDate <= currentDate) {
-        existingPurchase.packageStatus = "Expired";
-      } else {
-        existingPurchase.packageStatus = "pending";
-      }
-
-      existingPurchase.packagesId = pkg._id;
-      existingPurchase.expiryDate = expiryDate;
-
+      // Expire the old package
+      existingPurchase.packageStatus = "Expired";
       await existingPurchase.save();
 
+      // Create new purchase
+      const purchase = new PackagePurchaseModel({
+        userId,
+        packagesId: pkg._id,
+        purchaseDate: currentDate,
+        expiryDate,
+        transactionId,
+        sendernumber,
+        paymentStatus: "Completed",
+        packageStatus: "pending",
+      });
+
+      await purchase.save();
+
       res.status(200).json({
-        message: "Existing package details updated successfully",
-        purchase: existingPurchase,
+        message:
+          "Existing package expired and new package purchased successfully",
+        purchase,
       });
     } else {
       const purchase = new PackagePurchaseModel({
@@ -65,7 +74,6 @@ export const packagePurchaseController = async (req, res) => {
       });
 
       await purchase.save();
-
       res
         .status(200)
         .json({ message: "Package purchased successfully", purchase });
@@ -140,94 +148,114 @@ export const updateStatusController = async (req, res) => {
       purchase.packageStatus = packageStatus;
     }
 
-    // Finalize commission when package becomes active
+    // Handle commission when package becomes active
     if (packageStatus === "Active") {
       const user = await UserModel.findById(purchase.userId);
       if (user && user.referredBy) {
-        const referrer = await UserModel.findOne({
+        let referrer = await UserModel.findOne({
           referralCode: user.referredBy,
         });
-        if (referrer) {
-          const pkg = await PackagesModel.findById(purchase.packagesId);
-          if (pkg) {
-            const commissionRate = pkg.commissionRate || 0;
 
-            // Check currencies
-            const userCurrency = user.currency; // User's currency
-            const referrerCurrency = referrer.currency; // Referrer's currency
-
-            let commissionToAdd;
-
-            if (userCurrency === referrerCurrency) {
-              // Same currency, add directly
-              commissionToAdd = commissionRate;
-            } else {
-              // Different currencies, handle conversion
-              if (userCurrency === "USD" && referrerCurrency === "PKR") {
-                // Convert commission rate from USD to PKR
-                commissionToAdd = commissionRate * 280; // Assuming 1 USD = 280 PKR
-              } else if (userCurrency === "PKR" && referrerCurrency === "USD") {
-                // Convert commission rate from PKR to USD
-                commissionToAdd = commissionRate / 280; // Assuming 1 USD = 280 PKR
-              } else {
-                return res
-                  .status(400)
-                  .json({ message: "Unsupported currency conversion." });
-              }
-            }
-
-            // Add the commission
+        // Define function to process commission for each referrer in the chain
+        const processCommission = async (referrer, commissionAmount) => {
+          if (referrer) {
             referrer.CommissionAmount =
-              (referrer.CommissionAmount || 0) + commissionToAdd;
-            referrer.earnings = (referrer.earnings || 0) + commissionToAdd;
+              (referrer.CommissionAmount || 0) + commissionAmount;
+            referrer.earnings = (referrer.earnings || 0) + commissionAmount;
             referrer.TotalEarnings =
-              (referrer.TotalEarnings || 0) + commissionToAdd;
+              (referrer.TotalEarnings || 0) + commissionAmount;
             await referrer.save();
+          }
+        };
+
+        const pkg = await PackagesModel.findById(purchase.packagesId);
+        if (pkg) {
+          let commissionRate = pkg.commissionRate || 0;
+
+          // Handle currency conversion
+          const userCurrency = user.currency;
+          const referrerCurrency = referrer.currency;
+
+          let commissionToAdd;
+          if (userCurrency === referrerCurrency) {
+            commissionToAdd = commissionRate; // Same currency, no conversion needed
+          } else {
+            // Currency conversion
+            if (userCurrency === "USD" && referrerCurrency === "PKR") {
+              commissionToAdd = commissionRate * 280; // Convert USD to PKR
+            } else if (userCurrency === "PKR" && referrerCurrency === "USD") {
+              commissionToAdd = commissionRate / 280; // Convert PKR to USD
+            } else {
+              return res
+                .status(400)
+                .json({ message: "Unsupported currency conversion." });
+            }
+          }
+
+          // Process the commission for the first level referrer
+          await processCommission(referrer, commissionToAdd);
+
+          // Referral chain processing (if referrer has their own referrer)
+          let nextReferrer = referrer;
+          while (nextReferrer.referredBy) {
+            nextReferrer = await UserModel.findOne({
+              referralCode: nextReferrer.referredBy,
+            });
+            if (nextReferrer) {
+              // 50% commission of the previous referrer commission
+              let commissionToGive = commissionToAdd * 0.5;
+              await processCommission(nextReferrer, commissionToGive);
+              commissionToAdd = commissionToGive; // Update commission for the next referrer
+            }
           }
         }
       }
     } else if (["reject", "cancel"].includes(packageStatus)) {
+      // If the package is canceled or rejected, deduct commission from the referrers
       const user = await UserModel.findById(purchase.userId);
       if (user && user.referredBy) {
-        const referrer = await UserModel.findOne({
+        let referrer = await UserModel.findOne({
           referralCode: user.referredBy,
         });
-        if (referrer) {
-          const pkg = await PackagesModel.findById(purchase.packagesId);
-          if (pkg) {
-            const commissionRate = pkg.commissionRate || 0;
 
-            // Check currencies
-            const userCurrency = user.currency; // User's currency
-            const referrerCurrency = referrer.currency; // Referrer's currency
+        const pkg = await PackagesModel.findById(purchase.packagesId);
+        if (pkg) {
+          let commissionRate = pkg.commissionRate || 0;
 
-            let commissionToDeduct;
+          // Handle currency conversion
+          const userCurrency = user.currency;
+          const referrerCurrency = referrer.currency;
 
-            if (userCurrency === referrerCurrency) {
-              // Same currency, deduct directly
-              commissionToDeduct = commissionRate;
+          let commissionToDeduct;
+          if (userCurrency === referrerCurrency) {
+            commissionToDeduct = commissionRate;
+          } else {
+            // Currency conversion logic
+            if (userCurrency === "USD" && referrerCurrency === "PKR") {
+              commissionToDeduct = commissionRate * 280;
+            } else if (userCurrency === "PKR" && referrerCurrency === "USD") {
+              commissionToDeduct = commissionRate / 280;
             } else {
-              // Different currencies, handle conversion
-              if (userCurrency === "USD" && referrerCurrency === "PKR") {
-                // Convert commission rate from USD to PKR
-                commissionToDeduct = commissionRate * 280; // Assuming 1 USD = 280 PKR
-              } else if (userCurrency === "PKR" && referrerCurrency === "USD") {
-                // Convert commission rate from PKR to USD
-                commissionToDeduct = commissionRate / 280; // Assuming 1 USD = 280 PKR
-              } else {
-                return res
-                  .status(400)
-                  .json({ message: "Unsupported currency conversion." });
-              }
+              return res
+                .status(400)
+                .json({ message: "Unsupported currency conversion." });
             }
+          }
 
-            // Deduct the commission
-            referrer.CommissionAmount =
-              (referrer.CommissionAmount || 0) - commissionToDeduct;
-            referrer.earnings = (referrer.earnings || 0) - commissionToDeduct;
-            referrer.TotalEarnings =
-              (referrer.TotalEarnings || 0) - commissionToDeduct;
-            await referrer.save();
+          // Deduct the commission from the referrers
+          await processCommission(referrer, -commissionToDeduct);
+
+          // Referral chain deduction (if referrer has their own referrer)
+          let nextReferrer = referrer;
+          while (nextReferrer.referredBy) {
+            nextReferrer = await UserModel.findOne({
+              referralCode: nextReferrer.referredBy,
+            });
+            if (nextReferrer) {
+              let commissionToDeductNext = commissionToDeduct * 0.5;
+              await processCommission(nextReferrer, -commissionToDeductNext);
+              commissionToDeduct = commissionToDeductNext; // Update deduction for next referrer
+            }
           }
         }
       }
@@ -235,7 +263,6 @@ export const updateStatusController = async (req, res) => {
 
     // Save the updated status
     await purchase.save();
-
     res
       .status(200)
       .json({ message: "Package status updated successfully", purchase });
