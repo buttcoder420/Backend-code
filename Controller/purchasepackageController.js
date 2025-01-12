@@ -4,9 +4,8 @@ import UserModel from "../models/UserModel.js"; // Assuming UserModel is your us
 
 // Package Purchase Controller
 
-const USD_TO_PKR_RATE = 280;
-
 // Package Purchase Controller
+
 export const packagePurchaseController = async (req, res) => {
   try {
     const { slug, transactionId, sendernumber } = req.body;
@@ -32,7 +31,7 @@ export const packagePurchaseController = async (req, res) => {
     const expiryDate = new Date(currentDate);
     expiryDate.setDate(expiryDate.getDate() + pkg.duration); // Calculate expiry
 
-    // Expire existing active package
+    // Expire existing active or pending package
     await PackagePurchaseModel.updateMany(
       { userId, packageStatus: { $in: ["Active", "pending"] } },
       { $set: { packageStatus: "Expired" } }
@@ -61,38 +60,50 @@ export const packagePurchaseController = async (req, res) => {
   }
 };
 
-// Multi-Level Commission Distribution
-const distributeCommission = async (userId, amount, levels) => {
-  let currentUserId = userId;
-  let commissionPercentages = [40, 30, 20, 10, 5, 2.5, 1.25];
+const USD_TO_PKR_RATE = 280;
 
-  for (let level = 0; level < levels && currentUserId; level++) {
+// Function to handle commission distribution
+const distributeCommission = async (userId, commissionToAdd, level = 1) => {
+  let currentUserId = userId;
+  let commissionAmount = commissionToAdd;
+
+  // Loop to distribute commission down the referral chain
+  while (currentUserId && commissionAmount > 0) {
     const user = await UserModel.findById(currentUserId);
+
     if (user && user.referredBy) {
       const referrer = await UserModel.findOne({
         referralCode: user.referredBy,
       });
 
       if (referrer) {
-        const commission = (amount * commissionPercentages[level]) / 100;
+        // Halve commission for each subsequent level (50% commission for the next level)
+        let commissionForReferrer = commissionAmount / 2; // 50% of the commission
 
+        // Add commission to the referrer's earnings
         referrer.CommissionAmount =
-          (referrer.CommissionAmount || 0) + commission;
-        referrer.earnings = (referrer.earnings || 0) + commission;
-        referrer.TotalEarnings = (referrer.TotalEarnings || 0) + commission;
+          (referrer.CommissionAmount || 0) + commissionForReferrer;
+        referrer.earnings = (referrer.earnings || 0) + commissionForReferrer;
+        referrer.TotalEarnings =
+          (referrer.TotalEarnings || 0) + commissionForReferrer;
 
+        // Save referrer's updated information
         await referrer.save();
-        currentUserId = referrer._id; // Move up the referral chain
+
+        // Move up the referral chain and distribute commission
+        currentUserId = referrer._id;
+        level++;
+        commissionAmount = commissionForReferrer; // Set the new commission for the next level
       } else {
-        break; // No further referrers
+        break; // If no referrer found, stop the commission distribution
       }
     } else {
-      break; // No referrer for this user
+      break; // If no referredBy field, stop the commission distribution
     }
   }
 };
 
-// Update Package Status and Handle Commission
+// Update package status and finalize commission on activation
 export const updateStatusController = async (req, res) => {
   try {
     const { packageId } = req.params;
@@ -103,42 +114,71 @@ export const updateStatusController = async (req, res) => {
       return res.status(404).json({ message: "Package purchase not found" });
     }
 
-    const validStatusValues = [
-      "pending",
-      "processing",
-      "Active",
-      "cancel",
-      "Expired",
-      "Completed",
-    ];
+    const currentDate = new Date();
 
-    if (!validStatusValues.includes(packageStatus)) {
-      return res.status(400).json({ message: "Invalid package status" });
+    // Expiry logic: if the package expired
+    if (
+      purchase.expiryDate <= currentDate &&
+      purchase.packageStatus !== "Expired"
+    ) {
+      purchase.packageStatus = "Expired";
+    } else {
+      // Check if the status is valid
+      const validStatusValues = [
+        "pending",
+        "processing",
+        "Active",
+        "cancel",
+        "Expired",
+        "Completed",
+      ];
+      if (!validStatusValues.includes(packageStatus)) {
+        return res.status(400).json({ message: "Invalid package status" });
+      }
+      purchase.packageStatus = packageStatus;
     }
 
-    purchase.packageStatus = packageStatus;
-
+    // Finalize commission when package becomes active
     if (packageStatus === "Active") {
       const user = await UserModel.findById(purchase.userId);
       if (user && user.referredBy) {
         const referrer = await UserModel.findOne({
           referralCode: user.referredBy,
         });
-
         if (referrer) {
           const pkg = await PackagesModel.findById(purchase.packagesId);
           if (pkg) {
             const commissionRate = pkg.commissionRate || 0;
 
-            const initialCommission = commissionRate;
+            // Handle Currency Conversion
+            let commissionToAdd;
 
-            // Distribute multi-level commission
-            await distributeCommission(user._id, initialCommission, 7);
+            if (user.currency === referrer.currency) {
+              commissionToAdd = commissionRate;
+            } else {
+              commissionToAdd =
+                user.currency === "USD" && referrer.currency === "PKR"
+                  ? commissionRate * USD_TO_PKR_RATE
+                  : commissionRate / USD_TO_PKR_RATE;
+            }
+
+            // Add commission to the referrer's earnings
+            referrer.CommissionAmount =
+              (referrer.CommissionAmount || 0) + commissionToAdd;
+            referrer.earnings = (referrer.earnings || 0) + commissionToAdd;
+            referrer.TotalEarnings =
+              (referrer.TotalEarnings || 0) + commissionToAdd;
+
+            // Distribute commission up the referral chain
+            await distributeCommission(referrer._id, commissionToAdd);
+
+            await referrer.save();
           }
         }
       }
     }
 
+    // Save updated purchase
     await purchase.save();
 
     res
@@ -178,15 +218,19 @@ export const getAllTransactionController = async (req, res) => {
 };
 
 // Get user membership details
+// Get user membership details
 export const getUserMembershipController = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    const membership = await PackagePurchaseModel.findOne({ userId }).populate({
-      path: "packagesId",
-      select: "name duration earningRate",
-      model: PackagesModel,
-    });
+    // Find the most recent membership purchase (most recent by purchase date)
+    const membership = await PackagePurchaseModel.findOne({ userId })
+      .sort({ purchaseDate: -1 }) // Sort by purchaseDate in descending order
+      .populate({
+        path: "packagesId",
+        select: "name duration earningRate",
+        model: PackagesModel,
+      });
 
     if (!membership) {
       return res.status(404).json({ message: "No membership found" });
@@ -197,6 +241,42 @@ export const getUserMembershipController = async (req, res) => {
       packageStatus: membership.packageStatus,
       purchaseDate: membership.purchaseDate,
       expiryDate: membership.expiryDate,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Something went wrong" });
+  }
+};
+
+// Get latest user membership details
+// Get all user membership details (all records)
+export const getUserAllMembershipController = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Find all membership purchases for the logged-in user
+    const memberships = await PackagePurchaseModel.find({ userId }).populate({
+      path: "packagesId",
+      select: "name duration earningRate", // Retrieve the relevant package details
+      model: PackagesModel,
+    });
+
+    if (!memberships || memberships.length === 0) {
+      return res.status(404).json({ message: "No membership records found" });
+    }
+
+    // Respond with all membership records
+    const membershipDetails = memberships.map((membership) => ({
+      packageName: membership.packagesId.name,
+      packageStatus: membership.packageStatus,
+      purchaseDate: membership.purchaseDate,
+      expiryDate: membership.expiryDate,
+      earningRate: membership.packagesId.earningRate,
+    }));
+
+    res.status(200).json({
+      message: "All membership records fetched successfully",
+      memberships: membershipDetails,
     });
   } catch (error) {
     console.error(error);
