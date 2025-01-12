@@ -45,16 +45,6 @@ export const createPackageController = async (req, res) => {
         .send({ error: "Invalid currency, must be USD or PKR" });
     }
 
-    if (
-      typeof commissionRate !== "object" ||
-      !commissionRate.PKR ||
-      !commissionRate.USD
-    ) {
-      return res
-        .status(400)
-        .send({ error: "CommissionRate must include both PKR and USD rates" });
-    }
-
     // Calculate remaining price after discount
     const remainingPrice = calculateRemainingPrice(price, discount);
 
