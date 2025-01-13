@@ -11,16 +11,29 @@ const generateReferralCode = () => {
   return crypto.randomBytes(4).toString("hex").toUpperCase();
 };
 
+// Function to generate a unique slug
+const generateUniqueSlug = async (username) => {
+  let slug = slugify(username, { lower: true });
+  let user = await UserModel.findOne({ slug });
+  let counter = 1;
+
+  while (user) {
+    slug = `${slugify(username, { lower: true })}-${counter}`;
+    user = await UserModel.findOne({ slug });
+    counter++;
+  }
+
+  return slug;
+};
 const generateReferralLink = (referralCode) => {
-  const baseUrl = "http://localhost:3000"; // Replace with your actual base URL
+  const baseUrl = "https://earn-tube.online"; // Replace with your actual base URL
   return `${baseUrl}/login?referralCode=${referralCode}`;
 };
 
 // Registration Controller
-
 export const registerController = async (req, res) => {
   try {
-    const { username, email, password, referralCode } = req.body;
+    const { username, email, currency, password, referralCode } = req.body;
 
     // Validation
     if (!username) {
@@ -29,6 +42,7 @@ export const registerController = async (req, res) => {
     if (!email) {
       return res.status(400).send({ message: "Email is required" });
     }
+
     if (!password) {
       return res.status(400).send({ message: "Password is required" });
     }
@@ -61,6 +75,7 @@ export const registerController = async (req, res) => {
       username,
       slug,
       email,
+      currency,
       password: hashedPassword,
       referralCode: newReferralCode,
       referralLink,
@@ -97,20 +112,6 @@ export const registerController = async (req, res) => {
   }
 };
 
-// Function to generate a unique slug
-const generateUniqueSlug = async (username) => {
-  let slug = slugify(username, { lower: true });
-  let user = await UserModel.findOne({ slug });
-  let counter = 1;
-
-  while (user) {
-    slug = `${slugify(username, { lower: true })}-${counter}`;
-    user = await UserModel.findOne({ slug });
-    counter++;
-  }
-
-  return slug;
-};
 //Login Controller
 export const loginController = async (req, res) => {
   try {
@@ -197,7 +198,7 @@ const sendResetEmail = async (email, token) => {
     to: email,
     subject: "Password Reset",
     text: `To reset your password, please click the link below:
-    http://localhost:3000/request-password-reset/${token}`, // Corrected the link
+   https://https://earn-tube.online//request-password-reset/${token}`, // Corrected the link
   };
 
   await transporter.sendMail(mailOptions);
@@ -416,7 +417,11 @@ export const getUserEarnings = async (req, res) => {
 export const getTotalReferrals = async (req, res) => {
   try {
     // Get the user ID from the authenticated request
-    const userId = req.user._id; // Assuming you store user ID in req.user from authentication middleware
+    const userId = req.user?._id; // Ensure req.user exists
+
+    if (!userId) {
+      return res.status(400).json({ error: "Invalid user ID" });
+    }
 
     // Find the user based on user ID
     const user = await UserModel.findById(userId);
@@ -430,22 +435,42 @@ export const getTotalReferrals = async (req, res) => {
       referredBy: user.referralCode,
     });
 
+    if (!referredUsers.length) {
+      return res.status(200).json({ totalReferrals: 0, referralDetails: [] });
+    }
+
     // Prepare an array to store referral details
     let referralDetails = [];
 
-    // Loop through referred users to fetch their details
-    for (const referredUser of referredUsers) {
-      // Find package purchase details for each referred user
-      const packagePurchase = await PackagePurchaseModel.findOne({
-        userId: referredUser._id,
-      }).populate("packagesId", "name packageStatus"); // Populate 'packagesId' with 'name' and 'packageStatus'
+    // Fetch package details for all referred users in a single query to improve performance
+    const referredUserIds = referredUsers.map((user) => user._id);
 
-      // Add relevant details to referralDetails
+    // Fetch all package purchases for referred users
+    const packagePurchases = await PackagePurchaseModel.find({
+      userId: { $in: referredUserIds },
+    }).populate("packagesId", "name packageStatus");
+
+    // Create a map of package purchases based on userId
+    const packageMap = packagePurchases.reduce((map, purchase) => {
+      map[purchase.userId] = purchase;
+      return map;
+    }, {});
+
+    // Loop through referred users and prepare details
+    for (const referredUser of referredUsers) {
+      const packagePurchase = packageMap[referredUser._id] || null;
+
+      // Add safe null checks here before accessing packagePurchase fields
       referralDetails.push({
         username: referredUser.username,
         email: referredUser.email,
-        packageName: packagePurchase ? packagePurchase.packagesId.name : null,
-        packageStatus: packagePurchase ? packagePurchase.packageStatus : null,
+        packageName:
+          packagePurchase && packagePurchase.packagesId
+            ? packagePurchase.packagesId.name
+            : "No Package",
+        packageStatus: packagePurchase
+          ? packagePurchase.packageStatus
+          : "No Status",
       });
     }
 
@@ -460,8 +485,6 @@ export const getTotalReferrals = async (req, res) => {
 };
 
 // UserController.js
-// UserController.js
-// controllers/userController.js
 
 export const getEarningSlug = async (req, res) => {
   try {
@@ -546,6 +569,10 @@ export const getAllReferralsDetails = async (req, res) => {
       referredBy: user.referralCode,
     });
 
+    if (!referredUsers.length) {
+      return res.status(200).json({ referralDetails: [] });
+    }
+
     // Prepare an array to store referral details
     let referralDetails = [];
 
@@ -562,8 +589,13 @@ export const getAllReferralsDetails = async (req, res) => {
       referralDetails.push({
         username: referredUser.username,
         email: referredUser.email,
-        packageName: packagePurchase ? packagePurchase.packagesId.name : null,
-        packageStatus: packagePurchase ? packagePurchase.packageStatus : null,
+        packageName:
+          packagePurchase && packagePurchase.packagesId
+            ? packagePurchase.packagesId.name
+            : "No Package",
+        packageStatus: packagePurchase
+          ? packagePurchase.packageStatus
+          : "No Status",
         createdAt: referredUser.createdAt,
       });
     }
@@ -575,24 +607,83 @@ export const getAllReferralsDetails = async (req, res) => {
   }
 };
 
-//search user
-export const searchUser = async (req, res) => {
+//admin delete
+// Admin Controller to Delete a User
+export const adminDeleteUserController = async (req, res) => {
   try {
-    const { username, email } = req.query; // Getting username or email from query params
+    const { userId } = req.params; // Extract userId from route parameters
 
-    // Search for user by username or email
-    const user = await UserModel.findOne({
-      $or: [{ username: username }, { email: email }],
+    // Check if the user exists
+    const user = await UserModel.findById(userId);
+    if (!user) {
+      return res.status(404).send({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Delete the user
+    await UserModel.findByIdAndDelete(userId);
+
+    res.status(200).send({
+      success: true,
+      message: `User with ID ${userId} has been successfully deleted`,
     });
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    res.status(500).send({
+      success: false,
+      message: "Error deleting user",
+      error,
+    });
+  }
+};
+
+//banned user
+// Assuming the User model path
+
+// Admin function to band or unband a user
+export const toggleUserStatus = async (req, res) => {
+  const { userId, action } = req.body; // userId and action (band/unband)
+
+  try {
+    const user = await UserModel.findById(userId);
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Send user details as response
-    return res.status(200).json({ user });
+    if (action === "band") {
+      // Banding the user
+      const updatedEmail = user.email + "*band";
+      const updatedPassword = user.password + "*band";
+
+      user.email = updatedEmail;
+      user.password = updatedPassword;
+      user.status = "band"; // You can add a status field to manage band/unband status
+
+      await user.save();
+      return res
+        .status(200)
+        .json({ message: "User has been banded successfully" });
+    } else if (action === "unband") {
+      // Unbanding the user
+      const originalEmail = user.email.replace("*band", ""); // Remove '*band' from email
+      const originalPassword = user.password.replace("*band", ""); // Remove '*band' from password
+
+      user.email = originalEmail;
+      user.password = originalPassword;
+      user.status = "active"; // You can set status to active when unbanded
+
+      await user.save();
+      return res
+        .status(200)
+        .json({ message: "User has been unbanded successfully" });
+    } else {
+      return res.status(400).json({ message: "Invalid action" });
+    }
   } catch (error) {
-    console.error("Error searching user:", error);
+    console.error(error);
     return res.status(500).json({ message: "Server error" });
   }
 };
