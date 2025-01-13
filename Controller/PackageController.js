@@ -172,8 +172,6 @@ export const deletePackageController = async (req, res) => {
 };
 
 // Update Package Controller
-import slugify from "slugify";
-import PackagesModel from "../models/PackagesModel.js";
 
 // Utility function to calculate remaining price after discount
 const calculateRemainingPrice = (price, discount = 0) => {
