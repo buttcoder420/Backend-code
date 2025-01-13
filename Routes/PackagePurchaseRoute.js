@@ -14,7 +14,7 @@ const router = express.Router();
 
 // Purchase package route
 router.post(
-  "/purchasepackage",
+  "/package-purchase",
   requireSignIn,
 
   submitTransactionController
