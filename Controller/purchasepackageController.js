@@ -9,35 +9,38 @@ import UserModel from "../models/UserModel.js"; // Assuming UserModel is your us
 export const packagePurchaseController = async (req, res) => {
   try {
     const { slug, transactionId, sendernumber } = req.body;
-    const userId = req.user._id;
+    const userId = req.user._id; // Assuming user authentication middleware provides `req.user`
 
-    // Check for existing transaction ID
+    // Validate input
+    if (!slug || !transactionId || !sendernumber) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
     const existingTransaction = await PackagePurchaseModel.findOne({
       transactionId,
     });
     if (existingTransaction) {
+      console.log("Transaction ID already exists");
       return res.status(400).json({ message: "Transaction ID already exists" });
     }
-
-    // Find the package
+    // Find the package by slug
     const pkg = await PackagesModel.findOne({ slug });
     if (!pkg || !pkg.isActive) {
+      console.log("Package not available or inactive");
       return res
         .status(400)
         .json({ message: "Package not available or inactive" });
     }
-
     const currentDate = new Date();
     const expiryDate = new Date(currentDate);
-    expiryDate.setDate(expiryDate.getDate() + pkg.duration); // Calculate expiry
-
-    // Expire existing active or pending package
+    expiryDate.setDate(expiryDate.getDate() + pkg.duration);
+    console.log("Expiry date calculated:", expiryDate);
+    // Update all previous records for the user to "Expired"
     await PackagePurchaseModel.updateMany(
-      { userId, packageStatus: { $in: ["Active", "pending"] } },
+      { userId },
       { $set: { packageStatus: "Expired" } }
     );
 
-    // Create a new package purchase record
+    // Create a new record
     const purchase = new PackagePurchaseModel({
       userId,
       packagesId: pkg._id,
@@ -49,13 +52,14 @@ export const packagePurchaseController = async (req, res) => {
       packageStatus: "pending",
     });
 
+    // Save the new record
     await purchase.save();
 
     res
       .status(200)
       .json({ message: "Package purchased successfully", purchase });
   } catch (error) {
-    console.error(error);
+    console.error("Error occurred:", error);
     res.status(500).json({ message: "Something went wrong" });
   }
 };
