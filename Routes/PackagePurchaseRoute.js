@@ -6,7 +6,7 @@ import {
   getUserAllMembershipController,
   // getSingleController,
   getUserMembershipController,
-  packagePurchaseController,
+  submitTransactionController,
   updateStatusController,
 } from "../Controller/purchasepackageController.js";
 
@@ -16,8 +16,8 @@ const router = express.Router();
 router.post(
   "/purchasepackage",
   requireSignIn,
-  Formidable(),
-  packagePurchaseController
+
+  submitTransactionController
 );
 
 //get single by user
