@@ -6,7 +6,7 @@ import UserModel from "../models/UserModel.js"; // Assuming UserModel is your us
 
 // Package Purchase Controller
 
-export const packagePurchaseController = async (req, res) => {
+export const submitTransactionController = async (req, res) => {
   try {
     const { slug, transactionId, sendernumber } = req.body;
     const userId = req.user._id; // Assuming user authentication middleware provides `req.user`
