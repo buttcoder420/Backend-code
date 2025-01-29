@@ -3,6 +3,8 @@ import { isAdmin, requireSignIn } from "../middleware/UserMiddleware.js";
 import {
   createWithdrawalRequestController,
   deleteWithdrawalController,
+  getActiveReferralsController,
+  getLatestDeductionPercentController,
   getSingleWithdrawalController,
   getUserWithdrawalsByUserIdController,
   getUserWithdrawalsController,
@@ -17,6 +19,9 @@ router.post(
   requireSignIn,
   createWithdrawalRequestController
 );
+router.get("/get-active-refferal", requireSignIn, getActiveReferralsController);
+
+router.get("/get-deduct", requireSignIn, getLatestDeductionPercentController);
 
 // Get all withdrawals for a user
 router.get(
