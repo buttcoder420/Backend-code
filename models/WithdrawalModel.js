@@ -21,6 +21,14 @@ const WithdrawalSchema = new mongoose.Schema(
       ref: "packages",
       required: false,
     },
+    deductionPercent: {
+      type: Number,
+
+      default: 0, // You can change the default deduction percentage here
+    },
+    RemainingAmount: {
+      type: Number,
+    },
     paymentMethod: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "withdrawalaccount",
