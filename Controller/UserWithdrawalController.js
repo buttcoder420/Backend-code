@@ -58,36 +58,66 @@ export const createWithdrawalRequestController = async (req, res) => {
       });
     }
 
+    // // Fetch the latest withdrawal for this user
+    // const latestWithdrawal = await WithdrawalModel.findOne({
+    //   userId: req.user._id,
+    // }).sort({ createdAt: -1 });
+
+    // // Determine deduction percentage and remaining amount logic
+    // let deductionRate = 20; // Initial deduction rate
+    // let amountToStore = amount;
+    // let activeReferralExists = false;
+
     // Fetch the latest withdrawal for this user
     const latestWithdrawal = await WithdrawalModel.findOne({
       userId: req.user._id,
     }).sort({ createdAt: -1 });
 
     // Determine deduction percentage and remaining amount logic
-    let deductionRate = 20; // Initial deduction rate
+    let deductionRate = 20; // Default deduction rate
     let amountToStore = amount;
     let activeReferralExists = false;
 
     if (latestWithdrawal) {
-      // Check for active referrals within the time frame
-      const activeReferral = await PackagePurchaseModel.findOne({
-        userId: {
-          $in: await UserModel.find({ referredBy: user.referralCode }).distinct(
-            "_id"
-          ),
-        },
-        packageStatus: "Active",
-        createdAt: { $gte: latestWithdrawal.createdAt },
-      });
-
-      if (activeReferral) {
-        // Reset deduction if an active referral exists
-        activeReferralExists = true;
-        deductionRate = 0;
+      // Check if the latest withdrawal's deduction rate is 0
+      if (latestWithdrawal.deductionPercent === 0) {
+        // If deductionPercent is 0, this means there was an active referral, so start at 20% deduction
+        deductionRate = 20;
       } else {
-        // Increment deduction percentage for each withdrawal without referral
-        const lastDeduction = latestWithdrawal.deductionPercent || 20;
-        deductionRate = Math.min(lastDeduction + 10, 100); // Increment by 10%, cap at 100%
+        // Check for active referrals within the time frame
+        const activeReferral = await PackagePurchaseModel.findOne({
+          userId: {
+            $in: await UserModel.find({
+              referredBy: user.referralCode,
+            }).distinct("_id"),
+          },
+          packageStatus: "Active",
+          createdAt: { $gte: latestWithdrawal.createdAt },
+        });
+
+        if (activeReferral) {
+          // Reset deduction if an active referral exists
+          activeReferralExists = true;
+          deductionRate = 0; // Deduction becomes 0 when there is an active referral
+        } else {
+          // Increment deduction percentage for each withdrawal without referral
+          const lastDeduction = latestWithdrawal.deductionPercent || 20;
+          deductionRate = Math.min(lastDeduction + 10, 100); // Increment by 10%, cap at 100%
+        }
+      }
+    } else {
+      // If no previous withdrawal exists, start with 20%
+      deductionRate = 20;
+    }
+
+    // Calculate stored amount after deductions
+    if (!activeReferralExists) {
+      amountToStore = amount * (1 - deductionRate / 100); // Apply deduction
+      // If deduction rate is 100%, only 10% of the amount will be processed
+      if (deductionRate === 100) {
+        amountToStore = amount * 0.1; // Apply 10% of the amount
+      } else {
+        amountToStore = amount * (1 - deductionRate / 100); // Apply regular deduction
       }
     }
 
@@ -136,6 +166,110 @@ export const createWithdrawalRequestController = async (req, res) => {
       success: false,
       message: "Error in creating withdrawal request",
       error: error.message,
+    });
+  }
+};
+
+export const getWithdrawalAmountController = async (req, res) => {
+  try {
+    const { amount } = req.query;
+
+    // Check if amount is provided in the query
+    if (!amount) {
+      return res.status(400).send({ error: "Amount is required" });
+    }
+
+    const user = await UserModel.findById(req.user._id);
+
+    // Check if user exists
+    if (!user) {
+      return res.status(404).send({ error: "User not found" });
+    }
+
+    // Check if user has sufficient earnings
+    if (amount > user.earnings) {
+      return res.status(400).send({ error: "Insufficient earnings" });
+    }
+
+    // Fetch the latest withdrawal for this user
+    const latestWithdrawal = await WithdrawalModel.findOne({
+      userId: req.user._id,
+    }).sort({ createdAt: -1 });
+
+    // Determine deduction percentage and remaining amount logic
+    let deductionRate = 20; // Default deduction rate
+    let amountToStore = amount;
+    let activeReferralExists = false;
+
+    if (latestWithdrawal) {
+      // Check if the latest withdrawal's deduction rate is 0
+      if (latestWithdrawal.deductionPercent === 0) {
+        // If deductionPercent is 0, this means there was an active referral, so start at 20% deduction
+        deductionRate = 20;
+      } else {
+        // Check for active referrals within the time frame
+        const activeReferral = await PackagePurchaseModel.findOne({
+          userId: {
+            $in: await UserModel.find({
+              referredBy: user.referralCode,
+            }).distinct("_id"),
+          },
+          packageStatus: "Active",
+          createdAt: { $gte: latestWithdrawal.createdAt },
+        });
+
+        if (activeReferral) {
+          // Reset deduction if an active referral exists
+          activeReferralExists = true;
+          deductionRate = 0; // Deduction becomes 0 when there is an active referral
+        } else {
+          // Increment deduction percentage for each withdrawal without referral
+          const lastDeduction = latestWithdrawal.deductionPercent || 20;
+          deductionRate = Math.min(lastDeduction + 10, 100); // Increment by 10%, cap at 100%
+        }
+      }
+    } else {
+      // If no previous withdrawal exists, start with 20%
+      deductionRate = 20;
+    }
+
+    // Calculate stored amount after deductions
+    if (!activeReferralExists) {
+      amountToStore = amount * (1 - deductionRate / 100); // Apply deduction
+      // If deduction rate is 100%, only 10% of the amount will be processed
+      if (deductionRate === 100) {
+        amountToStore = amount * 0.1; // Apply 10% of the amount
+      } else {
+        amountToStore = amount * (1 - deductionRate / 100); // Apply regular deduction
+      }
+    }
+
+    // Calculate stored amount after deductions
+    if (!activeReferralExists) {
+      amountToStore = amount * (1 - deductionRate / 100); // Apply deduction
+      // Calculate stored amount after deductions
+
+      // If deduction rate is 100%, only 10% of the amount will be processed
+      if (deductionRate === 100) {
+        amountToStore = amount * 0.1; // Apply 10% of the amount
+      } else {
+        amountToStore = amount * (1 - deductionRate / 100); // Apply regular deduction
+      }
+    }
+
+    // Send the final amount to be withdrawn after deductions
+    res.status(200).send({
+      success: true,
+      originalAmount: amount,
+      deductionRate,
+      finalAmount: amountToStore,
+      remainingAmount: user.earnings - amount, // Remaining amount after withdrawal
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).send({
+      error: "Error fetching withdrawal amount",
+      message: error.message,
     });
   }
 };
