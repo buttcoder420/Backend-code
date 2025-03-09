@@ -94,9 +94,14 @@ export const registerController = async (req, res) => {
         // Store the referral in the new user's data
         userRegister.referredBy = referralCode;
 
-        // Add 60 to the new user's earnings and TotalEarning
-        userRegister.earnings += 60;
-        userRegister.TotalEarnings += 60;
+        // Check the currency and add the respective increment
+        if (currency === "PKR") {
+          userRegister.earnings += 60;
+          userRegister.TotalEarnings += 60;
+        } else if (currency === "USD") {
+          userRegister.earnings += 0.22;
+          userRegister.TotalEarnings += 0.22;
+        }
       }
     }
 
