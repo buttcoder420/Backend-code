@@ -8,6 +8,7 @@ import {
   getSingleWithdrawalController,
   getUserWithdrawalsByUserIdController,
   getUserWithdrawalsController,
+  getWithdrawalAmountController,
   updateWithdrawalStatusController,
 } from "../Controller/UserWithdrawalController.js";
 
@@ -49,6 +50,12 @@ router.put(
   requireSignIn,
   isAdmin,
   updateWithdrawalStatusController
+);
+
+router.get(
+  "/get-deudction-amount/amount",
+  requireSignIn,
+  getWithdrawalAmountController
 );
 
 // Delete a withdrawal
