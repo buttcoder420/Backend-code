@@ -31,6 +31,7 @@ const generateReferralLink = (referralCode) => {
 };
 
 // Registration Controller
+// Registration Controller
 export const registerController = async (req, res) => {
   try {
     const { username, email, currency, password, referralCode } = req.body;
@@ -42,7 +43,6 @@ export const registerController = async (req, res) => {
     if (!email) {
       return res.status(400).send({ message: "Email is required" });
     }
-
     if (!password) {
       return res.status(400).send({ message: "Password is required" });
     }
@@ -80,6 +80,8 @@ export const registerController = async (req, res) => {
       referralCode: newReferralCode,
       referralLink,
       accountStatus: "active",
+      earnings: 0, // Default earnings
+      TotalEarning: 0, // Default total earnings
     });
 
     // If referralCode is provided, update the referring user's data
@@ -91,6 +93,10 @@ export const registerController = async (req, res) => {
 
         // Store the referral in the new user's data
         userRegister.referredBy = referralCode;
+
+        // Add 60 to the new user's earnings and TotalEarning
+        userRegister.earnings += 60;
+        userRegister.TotalEarnings += 60;
       }
     }
 
@@ -685,5 +691,56 @@ export const toggleUserStatus = async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "Server error" });
+  }
+};
+
+//sms
+
+import VerificationModel from "../models/VerificationModel.js";
+
+// Function to send SMS based on earnings update
+export const updateEarningsAndSendSMS = async (userId, earningsChange) => {
+  try {
+    // Find user by userId and update earnings (assuming User model)
+    const user = await UserModel.findById(userId);
+
+    if (!user) {
+      console.error("User not found");
+      return;
+    }
+
+    // Update earnings
+    user.earnings += earningsChange;
+    await user.save();
+
+    // Find user's phone number from the verification schema
+    const verification = await VerificationModel.findOne({ userId: user._id });
+    if (!verification) {
+      console.error("Phone number not found in verification schema");
+      return;
+    }
+
+    let userPhoneNumber = verification.phoneNo;
+
+    // Prepare SMS message
+    let message;
+    if (earningsChange > 0) {
+      // Earnings increased
+      message = `EarnTube Authority: Dear user, you received ${earningsChange}. Your total earnings are now ${user.earnings}. Thank you for being a part of EarnTube!`;
+    } else {
+      // Earnings decreased (cash-out)
+      message = `EarnTube Authority: Dear user, you cashed out ${Math.abs(
+        earningsChange
+      )}. Your remaining earnings are now ${
+        user.earnings
+      }. Thank you for being a part of EarnTube!`;
+    }
+
+    // Send SMS
+    await sendEarningsSMS(userPhoneNumber, message); // Use the previously defined sendEarningsSMS function
+
+    console.log("Earnings updated and SMS sent");
+  } catch (error) {
+    console.error("Error updating earnings or sending SMS:", error);
   }
 };
