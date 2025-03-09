@@ -46,6 +46,17 @@ export const createWithdrawalRequestController = async (req, res) => {
         error: `Minimum withdrawal amount is ${withdrawalAccount.minAmount}`,
       });
     }
+    // Check if the user's package status is active
+    const activePackage = await PackagePurchaseModel.findOne({
+      userId: req.user._id,
+      packageStatus: "Active",
+    });
+
+    if (!activePackage) {
+      return res.status(400).send({
+        error: "You can only withdraw if you have an active package.",
+      });
+    }
 
     // Fetch the latest withdrawal for this user
     const latestWithdrawal = await WithdrawalModel.findOne({
