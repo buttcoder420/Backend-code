@@ -64,7 +64,7 @@ export const createWithdrawalRequestController = async (req, res) => {
     }).sort({ createdAt: -1 });
 
     // Determine deduction percentage and remaining amount logic
-    let deductionRate = 50; // Initial deduction rate
+    let deductionRate = 20; // Initial deduction rate
     let amountToStore = amount;
     let activeReferralExists = false;
 
@@ -86,7 +86,7 @@ export const createWithdrawalRequestController = async (req, res) => {
         deductionRate = 0;
       } else {
         // Increment deduction percentage for each withdrawal without referral
-        const lastDeduction = latestWithdrawal.deductionPercent || 50;
+        const lastDeduction = latestWithdrawal.deductionPercent || 20;
         deductionRate = Math.min(lastDeduction + 10, 100); // Increment by 10%, cap at 100%
       }
     }
